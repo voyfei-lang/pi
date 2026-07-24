@@ -23,11 +23,35 @@ jobs:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
 
-      - name: Merge upstream changes
+      - name: Merge upstream changes (keep fork workflows)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
           git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
-          git merge --no-edit "upstream/${UPSTREAM_BRANCH}"
-          git push origin "HEAD:${TARGET_BRANCH}"
+
+          # Keep this fork's Actions configuration. GitHub's GITHUB_TOKEN
+          # cannot push upstream changes that modify workflow files.
+          set +e
+          git merge --no-ff --no-commit --no-edit "upstream/${UPSTREAM_BRANCH}"
+          merge_status=$?
+          set -e
+
+          conflict_paths="$(git diff --name-only --diff-filter=U)"
+          if [ -n "$conflict_paths" ]; then
+            non_workflow_conflicts="$(printf '%s\n' "$conflict_paths" | grep -v '^\.github/workflows/' || true)"
+            if [ -n "$non_workflow_conflicts" ]; then
+              printf 'Unresolved non-workflow conflicts:\n%s\n' "$non_workflow_conflicts"
+              exit 1
+            fi
+          elif [ "$merge_status" -ne 0 ]; then
+            exit "$merge_status"
+          fi
+
+          git restore --source=HEAD --staged --worktree -- .github/workflows
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git commit --no-edit
+            git push origin "HEAD:${TARGET_BRANCH}"
+          else
+            echo "Already up to date."
+          fi
