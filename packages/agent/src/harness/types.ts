@@ -491,32 +491,9 @@ export interface JsonlSessionMetadata extends SessionMetadata {
 }
 
 export interface SessionEntryCursorOptions {
+	/** Number of entries already consumed; reading starts at this zero-based sequence. */
 	afterEntrySeq?: number;
 	limit?: number;
-}
-
-export interface SessionSnapshot<TMetadata extends SessionMetadata = SessionMetadata> {
-	metadata: TMetadata;
-	leafId: string | null;
-	entries: SessionTreeEntry[];
-}
-
-export interface SessionStorage<TMetadata extends SessionMetadata = SessionMetadata> {
-	getMetadata(): Promise<TMetadata>;
-	getLeafId(): Promise<string | null>;
-	/** Persist a leaf entry that records the active session-tree leaf. */
-	setLeafId(leafId: string | null): Promise<LeafEntry>;
-	createEntryId(): Promise<string>;
-	appendEntry(entry: SessionTreeEntry): Promise<void>;
-	getEntry(id: string): Promise<SessionTreeEntry | undefined>;
-	findEntries<TType extends SessionTreeEntry["type"]>(
-		type: TType,
-	): Promise<Array<Extract<SessionTreeEntry, { type: TType }>>>;
-	getLabel(id: string): Promise<string | undefined>;
-	getSessionName(): Promise<string | undefined>;
-	getSessionStats(): Promise<SessionStats>;
-	getPathToRootOrCompaction(leafId: string | null): Promise<SessionTreeEntry[]>;
-	getEntries(options?: SessionEntryCursorOptions): Promise<SessionTreeEntry[]>;
 }
 
 export type { Session } from "./session/session.ts";
@@ -538,14 +515,7 @@ export interface SessionSearchHit<TMetadata extends SessionMetadata = SessionMet
 	score?: number;
 }
 
-/** Maintains a derived search index. This is intentionally separate from query-only SessionSearch. */
-export interface SessionSearchIndex<TMetadata extends SessionMetadata = SessionMetadata> {
-	upsertEntry(metadata: TMetadata, entry: SessionTreeEntry): Promise<void>;
-	replaceSession(metadata: TMetadata, entries: readonly SessionTreeEntry[]): Promise<void>;
-	deleteSession(metadata: TMetadata): Promise<void>;
-}
-
-/** Owns session search queries. Index maintenance is composed at the store/adapter boundary. */
+/** Owns session search queries. */
 export interface SessionSearch<TMetadata extends SessionMetadata = SessionMetadata> {
 	search(options: SessionSearchOptions): Promise<SessionSearchHit<TMetadata>[]>;
 }
@@ -556,20 +526,40 @@ export interface SessionForkOptions {
 	id?: string;
 }
 
+export type SessionForkSelection =
+	/** Copy all persisted entries in append order. */
+	| { kind: "all" }
+	/** Copy the target's active path, excluding the target; the target must be a user message. */
+	| { kind: "before_user_message"; entryId: string }
+	/** Copy the target's active path, including the target. */
+	| { kind: "through_entry"; entryId: string };
+
+export interface SessionHead {
+	leafId: string | null;
+}
+
+/** Canonical reads for one stored session. Its lifetime is owned by the containing {@link SessionStore}. */
+export interface SessionReader<TMetadata extends SessionMetadata = SessionMetadata> {
+	readonly metadata: TMetadata;
+	/** Rejects with `invalid_session` when a non-null active leaf does not reference a stored entry. */
+	readHead(): Promise<SessionHead>;
+	readEntry(id: string): Promise<SessionTreeEntry | undefined>;
+	readEntries(options?: SessionEntryCursorOptions): Promise<readonly SessionTreeEntry[]>;
+	readPathToRootOrCompaction(leafId: string | null): Promise<readonly SessionTreeEntry[]>;
+}
+
+/** Owns persistence and resources shared by all sessions in a repository. */
 export interface SessionStore<
 	TMetadata extends SessionMetadata = SessionMetadata,
 	TCreateOptions extends SessionCreateOptions = SessionCreateOptions,
 	TListOptions = void,
-> {
-	create(options: TCreateOptions): Promise<TMetadata>;
-	load(metadata: TMetadata): Promise<SessionSnapshot<TMetadata>>;
+> extends AsyncDisposable {
+	create(options: TCreateOptions): Promise<SessionReader<TMetadata>>;
+	load(metadata: TMetadata): Promise<SessionReader<TMetadata>>;
 	list(options?: TListOptions): Promise<TMetadata[]>;
-	getEntries(metadata: TMetadata, options?: SessionEntryCursorOptions): Promise<SessionTreeEntry[]>;
-	createEntryId(metadata: TMetadata): Promise<string>;
 	appendEntry(metadata: TMetadata, entry: SessionTreeEntry): Promise<void>;
-	setLeafId(metadata: TMetadata, leafId: string | null): Promise<LeafEntry>;
 	delete(metadata: TMetadata): Promise<void>;
-	fork(source: TMetadata, options: SessionForkOptions & TCreateOptions): Promise<TMetadata>;
+	fork(source: TMetadata, options: TCreateOptions, selection: SessionForkSelection): Promise<SessionReader<TMetadata>>;
 }
 
 export interface JsonlSessionCreateOptions extends SessionCreateOptions {
@@ -581,9 +571,6 @@ export interface JsonlSessionCreateOptions extends SessionCreateOptions {
 export interface JsonlSessionListOptions {
 	cwd?: string;
 }
-
-export interface JsonlSessionStoreApi
-	extends SessionStore<JsonlSessionMetadata, JsonlSessionCreateOptions, JsonlSessionListOptions> {}
 
 export type AgentHarnessPhase = "idle" | "turn" | "compaction" | "branch_summary" | "retry";
 
