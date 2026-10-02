@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed "Selected model is at capacity" provider errors ending the turn instead of being retried ([#10278](https://github.com/earendil-works/pi/issues/10278))
+
+## [1.0.0] - 2026-10-01
+
+### Added
+
+- Added a copy code login method to Anthropic OAuth. Login asks for browser login (default) or copy code login, which shows the authorization code on Anthropic's page for pasting into pi and works when the browser runs on another machine ([#10194](https://github.com/earendil-works/pi/pull/10194) by [@lucasmeijer](https://github.com/lucasmeijer)).
+
+### Changed
+
+- Changed OAuth browser pages to use the color Pi logo.
+
+### Fixed
+
+- Fixed OpenAI Responses requests failing with `Expected an ID that begins with 'ctc'` when replaying grammar tool calls, such as `codemode`, from another provider or a gateway like Radius.
+
 ## [0.99.2] - 2026-09-30
 
 ### Added
